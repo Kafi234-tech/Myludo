@@ -1,0 +1,691 @@
+
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#17152b">
+<title>বন্ধু লুডু | Designed by Kafi</title>
+
+<style>
+*{box-sizing:border-box}
+body{
+ margin:0;padding:16px;
+ background:#17152b;color:white;
+ font-family:Arial,sans-serif
+}
+main{max-width:600px;margin:auto}
+h1{text-align:center;color:#ffd34d}
+.card{
+ background:#252240;padding:18px;
+ border-radius:20px;margin:14px 0
+}
+input,button{
+ width:100%;padding:15px;margin:6px 0;
+ border:0;border-radius:12px;font-size:16px
+}
+input{background:white;color:#222}
+button{
+ background:#8b6cff;color:white;
+ font-weight:bold;cursor:pointer
+}
+button:disabled{opacity:.4;cursor:not-allowed}
+.secondary{background:#393451}
+#status{color:#ffe18a;line-height:1.6}
+.small{font-size:14px;color:#c8c3e8;line-height:1.6}
+.info{display:flex;gap:8px}
+.info>div{
+ flex:1;background:#17152b;padding:12px 4px;
+ border-radius:12px;text-align:center;
+ overflow-wrap:anywhere
+}
+#board{
+ display:grid;grid-template-columns:repeat(8,minmax(0,1fr));
+ gap:4px;margin:16px 0
+}
+.cell{
+ aspect-ratio:1;background:#45415f;
+ border-radius:5px;display:flex;
+ align-items:center;justify-content:center;
+ font-size:11px;position:relative;
+ overflow:hidden;flex-wrap:wrap
+}
+.cell.safe{outline:2px solid white}
+.piece{
+ width:90%;height:90%;max-width:35px;
+ border:2px solid white;border-radius:50%;
+ display:flex;align-items:center;justify-content:center;
+ font-size:10px;font-weight:bold;color:white
+}
+.red{background:#e7475c!important}
+.blue{background:#348df0!important}
+.tokenrow{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.credit{
+ text-align:center;padding:20px 5px;
+ color:#c8c3e8;font-size:14px;letter-spacing:1px
+}
+.credit span{color:#ffd34d;font-weight:bold}
+@media(max-width:360px){
+ body{padding:9px}
+ .card{padding:12px}
+ .info{gap:4px}
+ .info>div{font-size:13px}
+}
+</style>
+</head>
+
+<body>
+<main>
+
+<h1>🎲 মাহির লুডু</h1>
+<p class="small" style="text-align:center">
+মাহির সঙ্গে অনলাইনে খেলো!
+</p>
+
+<div class="card">
+<h3>🏠 Private Room</h3>
+
+<button id="createBtn">নতুন রুম তৈরি</button>
+
+<input id="roomInput"
+ placeholder="বন্ধুর Room ID লিখো"
+ maxlength="8" autocomplete="off">
+
+<button id="joinBtn" class="secondary">
+রুমে যোগ দাও
+</button>
+
+<p id="roomText" class="small">
+এখনো কোনো রুমে যোগ দাওনি।
+</p>
+
+<button id="shareBtn" disabled>
+বন্ধুকে লিংক পাঠাও
+</button>
+
+<p id="status">শুরু করতে নতুন রুম তৈরি করো।</p>
+</div>
+
+<div class="card">
+
+<div class="info">
+ <div><small>তোমার রং</small><br><b id="myColor">—</b></div>
+ <div><small>পাশার ফল</small><br><b id="dice">—</b></div>
+ <div><small>খেলোয়াড়</small><br><b id="players">0/2</b></div>
+</div>
+
+<button id="rollBtn" disabled>🎲 পাশা ফেলো</button>
+
+<div id="board"></div>
+
+<h3>নিজের ঘুঁটি বেছে নাও</h3>
+<div id="tokens" class="tokenrow"></div>
+</div>
+
+<p class="small">
+নিয়ম: ঘুঁটি বের করতে ৬ লাগবে। পাশার ফল অনুযায়ী ঘুঁটি এগোবে।
+প্রতিপক্ষের ঘুঁটি কাটলে সেটি ঘরে ফিরবে।
+</p>
+
+<footer class="credit">
+Designed by <span>Kafi</span> ❤️
+</footer>
+
+</main>
+
+<script type="module">
+
+import { initializeApp }
+from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+
+import {
+ getAuth,
+ signInAnonymously
+}
+from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+
+import {
+ getDatabase,
+ ref,
+ get,
+ set,
+ update,
+ onValue,
+ runTransaction
+}
+from "https://www.gstatic.com/firebasejs/10.14.1/firebase-database.js";
+
+
+/* FIREBASE CONFIG */
+const firebaseConfig = {
+ apiKey: "AIzaSyAMq31qlP_eKpzbuVCumF8-3sDYadFvnFk",
+ authDomain: "ludoo-a1899.firebaseapp.com",
+ databaseURL: "https://ludoo-a1899-default-rtdb.asia-southeast1.firebasedatabase.app",
+ projectId: "ludoo-a1899",
+ appId: "1:996550805706:web:cec2549092b6a9cbff8c33"
+};
+
+const $ = id => document.getElementById(id);
+
+const names = {
+ red: "লাল",
+ blue: "নীল"
+};
+
+const colors = ["red", "blue"];
+
+let app = null;
+let db = null;
+let auth = null;
+let currentUser = null;
+let playerId = null;
+let roomId = null;
+let myColor = null;
+let game = null;
+let unsubscribe = null;
+let busy = false;
+
+
+/* STATUS */
+function say(message) {
+ $("status").textContent = message;
+}
+
+
+/* FIREBASE CONNECTION */
+async function connectFirebase() {
+ try {
+  if (!app) {
+   app = initializeApp(firebaseConfig);
+   auth = getAuth(app);
+   db = getDatabase(app);
+  }
+
+  if (auth.authStateReady) {
+   await auth.authStateReady();
+  }
+
+  if (!auth.currentUser) {
+   await signInAnonymously(auth);
+  }
+
+  currentUser = auth.currentUser;
+
+  if (!currentUser) {
+   throw new Error("Anonymous sign-in সম্পন্ন হয়নি।");
+  }
+
+  playerId = currentUser.uid;
+  return true;
+
+ } catch (error) {
+  console.error(error);
+  say("Firebase error: " + error.message);
+  return false;
+ }
+}
+
+
+/* ROOM REFERENCE */
+function roomRef(id = roomId) {
+ if (!id || !db) {
+  throw new Error("Room ID অথবা Database পাওয়া যায়নি।");
+ }
+
+ return ref(db, "rooms/" + id);
+}
+
+
+/* NEW GAME DATA */
+function makeGame() {
+ return {
+  players: {
+   red: null,
+   blue: null
+  },
+  turn: "red",
+  dice: null,
+  rolled: false,
+  winner: null,
+  tokens: {
+   red: [-1, -1, -1, -1],
+   blue: [-1, -1, -1, -1]
+  }
+ };
+}
+
+
+/* ROOM DISPLAY */
+function displayRoom() {
+ $("roomText").textContent = "Room ID: " + roomId;
+ $("myColor").textContent = names[myColor] || "—";
+ $("shareBtn").disabled = false;
+
+ const url = new URL(location.href);
+ url.searchParams.set("room", roomId);
+ history.replaceState({}, "", url);
+}
+
+
+/* CREATE ROOM */
+async function createRoom() {
+ if (busy) return;
+ busy = true;
+ $("createBtn").disabled = true;
+
+ try {
+  if (!(await connectFirebase())) return;
+
+  roomId = Math.random().toString(36)
+   .slice(2, 8).toUpperCase();
+
+  const data = makeGame();
+  data.players.red = playerId;
+
+  await set(roomRef(), data);
+
+  myColor = "red";
+  listenRoom();
+  displayRoom();
+
+  say("রুম তৈরি হয়েছে! বন্ধুকে Room ID পাঠাও।");
+
+ } catch (error) {
+  console.error(error);
+  say("রুম তৈরি হয়নি: " + error.message);
+ } finally {
+  busy = false;
+  $("createBtn").disabled = false;
+ }
+}
+
+
+/* JOIN ROOM */
+async function joinRoom() {
+ if (busy) return;
+ busy = true;
+ $("joinBtn").disabled = true;
+
+ try {
+  if (!(await connectFirebase())) return;
+
+  const code = $("roomInput").value
+   .trim().toUpperCase();
+
+  if (!/^[A-Z0-9]{4,8}$/.test(code)) {
+   say("সঠিক Room ID লিখো।");
+   return;
+  }
+
+  const snapshot = await get(roomRef(code));
+
+  if (!snapshot.exists()) {
+   say("রুম পাওয়া যায়নি। Room ID পরীক্ষা করো।");
+   return;
+  }
+
+  const data = snapshot.val();
+
+  if (data.players?.red === playerId) {
+   roomId = code;
+   myColor = "red";
+
+  } else if (data.players?.blue === playerId) {
+   roomId = code;
+   myColor = "blue";
+
+  } else if (!data.players?.blue) {
+
+   const result = await runTransaction(
+    roomRef(code),
+    current => {
+     if (!current) return;
+
+     if (
+      current.players?.red === playerId ||
+      current.players?.blue === playerId
+     ) {
+      return current;
+     }
+
+     if (!current.players?.blue) {
+      current.players.blue = playerId;
+      return current;
+     }
+
+     return;
+    }
+   );
+
+   if (!result.committed) {
+    say("এই রুমে ইতিমধ্যে দুজন আছে।");
+    return;
+   }
+
+   roomId = code;
+   myColor = result.snapshot.val().players.red === playerId
+    ? "red" : "blue";
+
+  } else {
+   say("এই রুমে ইতিমধ্যে দুজন আছে।");
+   return;
+  }
+
+  listenRoom();
+  displayRoom();
+  say("রুমে যোগ দিয়েছ! 🎲");
+
+ } catch (error) {
+  console.error(error);
+  say("যোগ দেওয়া যায়নি: " + error.message);
+ } finally {
+  busy = false;
+  $("joinBtn").disabled = false;
+ }
+}
+
+
+/* LISTEN TO LIVE GAME */
+function listenRoom() {
+ if (unsubscribe) unsubscribe();
+
+ unsubscribe = onValue(
+  roomRef(),
+  snapshot => {
+   if (!snapshot.exists()) {
+    say("রুমটি পাওয়া যাচ্ছে না।");
+    return;
+   }
+
+   game = snapshot.val();
+   render();
+  },
+  error => {
+   console.error(error);
+   say("Database error: " + error.message);
+  }
+ );
+}
+
+
+/* ROLL DICE */
+async function rollDice() {
+ if (!game || !myColor || busy) return;
+
+ if (game.turn !== myColor || game.rolled || game.winner) {
+  return;
+ }
+
+ if (!game.players?.red || !game.players?.blue) {
+  say("বন্ধুর যোগ দেওয়ার অপেক্ষায়…");
+  return;
+ }
+
+ busy = true;
+
+ try {
+  const result = await runTransaction(
+   roomRef(),
+   current => {
+    if (
+     !current ||
+     current.turn !== myColor ||
+     current.rolled ||
+     current.winner ||
+     !current.players?.red ||
+     !current.players?.blue
+    ) return;
+
+    current.dice = Math.floor(Math.random() * 6) + 1;
+    current.rolled = true;
+    return current;
+   }
+  );
+
+  if (!result.committed) {
+   say("চাল দেওয়া যাচ্ছে না। আবার চেষ্টা করো।");
+  }
+
+ } catch (error) {
+  console.error(error);
+  say("পাশা ফেলতে সমস্যা: " + error.message);
+ } finally {
+  busy = false;
+ }
+}
+
+
+/* MOVE TOKEN */
+async function moveToken(index) {
+ if (!game || !myColor || busy) return;
+
+ if (
+  game.turn !== myColor ||
+  !game.rolled ||
+  game.winner
+ ) return;
+
+ const dice = Number(game.dice);
+
+ if (!Number.isInteger(dice) || dice < 1 || dice > 6) {
+  say("পাশার ফল পাওয়া যায়নি।");
+  return;
+ }
+
+ const currentPos = game.tokens?.[myColor]?.[index];
+
+ if (currentPos === undefined) return;
+
+ if (currentPos === -1 && dice !== 6) {
+  say("ঘুঁটি বের করতে ৬ লাগবে।");
+  return;
+ }
+
+ const pos = currentPos === -1 ? 0 : currentPos + dice;
+
+ if (pos > 56) {
+  say("এই ঘুঁটির জন্য পাশার সংখ্যা বেশি।");
+  return;
+ }
+
+ busy = true;
+
+ try {
+  const other = myColor === "red" ? "blue" : "red";
+
+  const result = await runTransaction(
+   roomRef(),
+   current => {
+    if (
+     !current ||
+     current.turn !== myColor ||
+     !current.rolled ||
+     current.winner ||
+     Number(current.dice) !== dice
+    ) return;
+
+    const tokens = current.tokens;
+    if (!tokens?.[myColor] || !tokens?.[other]) return;
+
+    const oldPos = tokens[myColor][index];
+
+    if (oldPos === -1 && dice !== 6) return;
+
+    const newPos = oldPos === -1 ? 0 : oldPos + dice;
+
+    if (newPos > 56) return;
+
+    tokens[myColor][index] = newPos;
+
+    const start = myColor === "red" ? 0 : 26;
+    const otherStart = other === "red" ? 0 : 26;
+    const square = (start + newPos) % 52;
+
+    const safe = [0, 8, 13, 21, 26, 34, 39, 47];
+
+    if (newPos < 52 && !safe.includes(square)) {
+     tokens[other] = tokens[other].map(p => {
+      if (p < 0 || p >= 52) return p;
+      return (otherStart + p) % 52 === square ? -1 : p;
+     });
+    }
+
+    const winner = tokens[myColor].every(p => p === 56);
+
+    current.winner = winner ? myColor : null;
+    current.turn = winner || dice === 6 ? myColor : other;
+    current.dice = null;
+    current.rolled = false;
+
+    return current;
+   }
+  );
+
+  if (!result.committed) {
+   say("চালটি গ্রহণ হয়নি। আবার চেষ্টা করো।");
+  }
+
+ } catch (error) {
+  console.error(error);
+  say("ঘুঁটি চালাতে সমস্যা: " + error.message);
+ } finally {
+  busy = false;
+ }
+}
+
+
+/* RENDER GAME */
+function render() {
+ if (!game) return;
+
+ const red = game.players?.red;
+ const blue = game.players?.blue;
+ const count = (red ? 1 : 0) + (blue ? 1 : 0);
+
+ $("dice").textContent = game.dice ?? "—";
+ $("players").textContent = count + "/2";
+
+ $("rollBtn").disabled = !(
+  myColor &&
+  game.turn === myColor &&
+  !game.rolled &&
+  !game.winner &&
+  count === 2
+ );
+
+ if (game.winner) {
+  say(names[game.winner] + " খেলোয়াড় জিতেছে! 🏆");
+ } else if (count < 2) {
+  say("বন্ধুর যোগ দেওয়ার অপেক্ষায়…");
+ } else if (game.turn === myColor) {
+  say(game.rolled
+   ? "তোমার চাল! একটি ঘুঁটি বেছে নাও।"
+   : "তোমার চাল! পাশা ফেলো।");
+ } else {
+  say("বন্ধুর চালের অপেক্ষায়…");
+ }
+
+ /* SIMPLE TRACK */
+ const board = $("board");
+ board.innerHTML = "";
+
+ for (let i = 0; i < 52; i++) {
+  const cell = document.createElement("div");
+  cell.className = "cell";
+  cell.textContent = i + 1;
+
+  if ([0, 8, 13, 21, 26, 34, 39, 47].includes(i)) {
+   cell.classList.add("safe");
+  }
+
+  for (const color of colors) {
+   (game.tokens?.[color] || []).forEach((pos, index) => {
+    const start = color === "red" ? 0 : 26;
+
+    if (pos >= 0 && pos < 52 && (start + pos) % 52 === i) {
+     const piece = document.createElement("span");
+     piece.className = "piece " + color;
+     piece.textContent = index + 1;
+     cell.appendChild(piece);
+    }
+   });
+  }
+
+  board.appendChild(cell);
+ }
+
+ const tokenBox = $("tokens");
+ tokenBox.innerHTML = "";
+
+ if (!myColor || !game.tokens?.[myColor]) return;
+
+ for (let i = 0; i < 4; i++) {
+  const b = document.createElement("button");
+  const pos = game.tokens[myColor][i];
+
+  b.textContent = "ঘুঁটি " + (i + 1) + " · " +
+   (pos === -1 ? "ঘরে" : pos === 56 ? "Home" : pos);
+
+  b.disabled = !(
+   game.turn === myColor &&
+   game.rolled &&
+   !game.winner
+  );
+
+  b.onclick = () => moveToken(i);
+  tokenBox.appendChild(b);
+ }
+}
+
+
+/* BUTTON EVENTS */
+$("createBtn").addEventListener("click", createRoom);
+$("joinBtn").addEventListener("click", joinRoom);
+$("rollBtn").addEventListener("click", rollDice);
+
+
+/* SHARE ROOM LINK */
+$("shareBtn").addEventListener("click", async () => {
+ if (!roomId) return;
+
+ const url = new URL(location.href);
+ url.searchParams.set("room", roomId);
+
+ const message =
+  "চলো অনলাইনে লুডু খেলি! 🎲\n" +
+  "Room ID: " + roomId + "\n" +
+  url.toString();
+
+ try {
+  if (navigator.share) {
+   await navigator.share({
+    title: "বন্ধু লুডু",
+    text: message,
+    url: url.toString()
+   });
+  } else if (navigator.clipboard?.writeText) {
+   await navigator.clipboard.writeText(message);
+   say("রুমের লিংক কপি হয়েছে। বন্ধুকে পাঠাও।");
+  } else {
+   window.prompt("এই লিংকটি কপি করে পাঠাও:", message);
+  }
+ } catch (error) {
+  if (error.name !== "AbortError") {
+   window.prompt("Room ID ও লিংক কপি করো:", message);
+  }
+ }
+});
+
+
+/* FILL ROOM ID FROM SHARED LINK */
+const savedRoom = new URLSearchParams(location.search)
+ .get("room");
+
+if (savedRoom) {
+ $("roomInput").value = savedRoom.toUpperCase();
+ say("বন্ধুর রুমে যোগ দিতে 'রুমে যোগ দাও' চাপো।");
+}
+
+</script>
+</body>
+</html>
